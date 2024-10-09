@@ -1,17 +1,15 @@
 import argparse
 import os
 import sys
-import math
+from datetime import datetime
+from typing import Tuple
+
+import h5py
 import numpy as np
 import torch
-import h5py
-import random
-
-from typing import Tuple
 from scipy.integrate import solve_ivp
-from copy import copy
-from datetime import datetime
-from equations.PDEs import PDE, KdV, KS, Heat
+
+from equations.PDEs import KS, PDE, Heat, KdV
 
 
 def check_files(pde: PDE, modes: dict) -> None:
@@ -24,32 +22,37 @@ def check_files(pde: PDE, modes: dict) -> None:
             None
     """
     for mode, replace, num_samples, suffix in modes:
-        save_name = "data/" + "_".join([str(pde), mode])
+        save_name = (
+            "/data/shared/meta-pde/sampled_parameters/kdv-1d/unprocessed/"
+            + "_".join([str(pde), mode])
+        )
         if mode == "train":
             save_name = save_name + "_" + str(num_samples)
         if suffix:
             save_name = save_name + "_" + suffix
-        if (replace == True):
-            if os.path.exists(f'{save_name}.h5'):
-                os.remove(f'{save_name}.h5')
-                print(f'File {save_name}.h5 is deleted.')
+        if replace == True:
+            if os.path.exists(f"{save_name}.h5"):
+                os.remove(f"{save_name}.h5")
+                print(f"File {save_name}.h5 is deleted.")
             else:
-                print(f'No file {save_name}.h5 exists yet.')
+                print(f"No file {save_name}.h5 exists yet.")
         else:
-            print(f'File {save_name}.h5 is kept.')
+            print(f"File {save_name}.h5 is kept.")
+
 
 def check_directory() -> None:
     """
     Check if data and log directories exist, and create otherwise.
     """
-    if os.path.exists(f'data'):
-        print(f'Data directory exists and will be written to.')
+    if os.path.exists("data"):
+        print("Data directory exists and will be written to.")
     else:
-        os.mkdir(f'data')
-        print(f'Data directory created.')
+        os.mkdir("data")
+        print("Data directory created.")
 
-    if not os.path.exists(f'data/log'):
-        os.mkdir(f'data/log')
+    if not os.path.exists("data/log"):
+        os.mkdir("data/log")
+
 
 def initial_conditions(A: np.ndarray, phi: np.ndarray, l: np.ndarray, L: float):
     """
@@ -62,12 +65,17 @@ def initial_conditions(A: np.ndarray, phi: np.ndarray, l: np.ndarray, L: float):
     Returns:
         None
     """
+
     def fnc(x):
         u = np.sum(A * np.sin(2 * np.pi * l * x / L + phi), -1)
         return u
+
     return fnc
 
-def params(pde: PDE, batch_size: int, device: torch.cuda.device="cpu") -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+
+def params(
+    pde: PDE, batch_size: int, device: torch.cuda.device = "cpu"
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Get initial parameters for KdV, KS, and Burgers' equation.
     Args:
@@ -84,7 +92,8 @@ def params(pde: PDE, batch_size: int, device: torch.cuda.device="cpu") -> Tuple[
     l = np.random.randint(pde.lmin, pde.lmax, (1, pde.N))
     return A, phi, l
 
-def inv_cole_hopf(psi0: np.ndarray, scale: float = 10.) -> np.ndarray:
+
+def inv_cole_hopf(psi0: np.ndarray, scale: float = 10.0) -> np.ndarray:
     """
     Inverse Cole-Hopf transformation to obtain Heat equation out of initial conditions of Burgers' equation.
     Args:
@@ -98,12 +107,15 @@ def inv_cole_hopf(psi0: np.ndarray, scale: float = 10.) -> np.ndarray:
     psi0 = np.exp(psi0)
     return psi0
 
-def generate_trajectories(pde: PDE,
-                          mode: str,
-                          num_samples: int,
-                          suffix: str,
-                          batch_size: int,
-                          device: torch.cuda.device="cpu") -> None:
+
+def generate_trajectories(
+    pde: PDE,
+    mode: str,
+    num_samples: int,
+    suffix: str,
+    batch_size: int,
+    device: torch.cuda.device = "cpu",
+) -> None:
     """
     Generate data trajectories for KdV, KS equation on periodic spatial domains.
     Args:
@@ -118,29 +130,31 @@ def generate_trajectories(pde: PDE,
     """
 
     # parallel data generation is not yet implemented
-    assert(batch_size == 1)
+    assert batch_size == 1
     num_batches = num_samples // batch_size
 
     pde_string = str(pde)
-    print(f'Equation: {pde_string}')
-    print(f'Mode: {mode}')
-    print(f'Number of samples: {num_samples}')
+    print(f"Equation: {pde_string}")
+    print(f"Mode: {mode}")
+    print(f"Number of samples: {num_samples}")
 
     sys.stdout.flush()
 
-    save_name = "data/" + "_".join([pde_string, mode])
+    save_name = "/data/shared/meta-pde/kdv-1d/unprocessed/" + "_".join(
+        [pde_string, mode]
+    )
     if mode == "train":
         save_name = save_name + "_" + str(num_samples)
     if suffix:
-        save_name = save_name + '_' + suffix
-    h5f = h5py.File("".join([save_name, '.h5']), 'a')
-    dataset = h5f.create_group(mode)
+        save_name = save_name + "_" + suffix
+    h5f = h5py.File("".join([save_name, ".h5"]), "a")
+    # dataset = h5f.create_group(mode)
 
-    tcoord = {}
-    xcoord = {}
-    dx = {}
-    dt = {}
-    h5f_u = {}
+    # tcoord = {}
+    # xcoord = {}
+    # dx = {}
+    # dt = {}
+    # h5f_u = {}
 
     # Tolerance of the solver
     tol = 1e-9
@@ -148,17 +162,19 @@ def generate_trajectories(pde: PDE,
     nx = pde.grid_size[1]
     # The field u, the coordinations (xcoord, tcoord) and dx, dt are saved
     # Only nt_effective time steps of each trajectories are saved
-    h5f_u = dataset.create_dataset(f'pde_{pde.nt_effective}-{nx}', (num_samples, pde.nt_effective, nx), dtype=float)
-    xcoord = dataset.create_dataset(f'x', (num_samples, nx), dtype=float)
-    dx = dataset.create_dataset(f'dx', (num_samples,), dtype=float)
-    tcoord = dataset.create_dataset(f't', (num_samples, pde.nt_effective), dtype=float)
-    dt = dataset.create_dataset(f'dt', (num_samples,), dtype=float)
+    # h5f_u = dataset.create_dataset(
+    #     f"pde_{pde.nt_effective}-{nx}", (num_samples, pde.nt_effective, nx), dtype=float
+    # )
+    # xcoord = dataset.create_dataset("x", (num_samples, nx), dtype=float)
+    # dx = dataset.create_dataset("dx", (num_samples,), dtype=float)
+    # tcoord = dataset.create_dataset("t", (num_samples, pde.nt_effective), dtype=float)
+    # dt = dataset.create_dataset("dt", (num_samples,), dtype=float)
 
     for idx in range(num_batches):
-
+        dataset = h5f.create_group(f"{idx:04d}")
         # For the Heat (Burgers') equation, a fixed grid is used
         # For KdV and KS, the grid is flexible ->  this is due to scale symmetries which we want to exploit
-        if pde_string == 'Heat':
+        if pde_string == "Heat":
             T = pde.tmax
             L = pde.L
 
@@ -180,7 +196,7 @@ def generate_trajectories(pde: PDE,
         u0 = initial_conditions(A, omega, l, L)(x[:, None])
 
         # We use the initial condition of Burgers' equation and inverse Cole-Hopf transform it into the Heat equation
-        if pde_string == 'Heat':
+        if pde_string == "Heat":
             u0 = inv_cole_hopf(u0)
 
         # We use pseudospectral reconstruction as spatial solver
@@ -188,28 +204,48 @@ def generate_trajectories(pde: PDE,
 
         # Solving for the full trajectories
         # For integration in time, we use an implicit Runge-Kutta method of Radau IIA family, order 5
-        solved_trajectory = solve_ivp(fun=spatial_method,
-                                      t_span=[t[0], t[-1]],
-                                      y0=u0,
-                                      method='Radau',
-                                      t_eval=t,
-                                      args=(L, ),
-                                      atol=tol,
-                                      rtol=tol)
+        solved_trajectory = solve_ivp(
+            fun=spatial_method,
+            t_span=[t[0], t[-1]],
+            y0=u0,
+            method="Radau",
+            t_eval=t,
+            args=(L,),
+            atol=tol,
+            rtol=tol,
+        )
 
         # Saving the trajectories, if successfully solved
         if solved_trajectory.success:
-            sol = solved_trajectory.y.T[-pde.nt_effective:]
-            h5f_u[idx:idx+1, :, :] = sol
-            xcoord[idx:idx+1, :] = x
-            dx[idx:idx+1] = L/nx
-            tcoord[idx:idx + 1, :] = t[-pde.nt_effective:]
-            dt[idx:idx+1] = T/(nt-1)
+            sol = solved_trajectory.y.T[-pde.nt_effective :]
+
+            # Add channel dim
+            sol = sol[..., None]
+
+            # h5f_u[idx : idx + 1, :, :] = sol
+            # xcoord[idx : idx + 1, :] = x
+            # dx[idx : idx + 1] = L / nx
+            # tcoord[idx : idx + 1, :] = t[-pde.nt_effective :]
+            # dt[idx : idx + 1] = T / (nt - 1)
+            """
+            New dataset format:
+
+            d[{trajectory_id}]['data'] = solution[nt, nx, ny, 1]
+            d[{trajectory_id}]['grid']['t'] = t
+            d[{trajectory_id}]['grid']['x'] = x
+            """
+            dataset["data"] = sol
+            dataset["grid/t"] = t[-pde.nt_effective :]
+            dataset["grid/x"] = x
 
         else:
             print("Solution was not successful.")
 
-        print("Solved indices: {:d} : {:d}".format(idx * batch_size, (idx + 1) * batch_size - 1))
+        print(
+            "Solved indices: {:d} : {:d}".format(
+                idx * batch_size, (idx + 1) * batch_size - 1
+            )
+        )
         print("Solved batches: {:d} of {:d}".format(idx + 1, num_batches))
         sys.stdout.flush()
 
@@ -219,18 +255,22 @@ def generate_trajectories(pde: PDE,
     print()
     h5f.close()
 
-def generate_data(experiment: str,
-                  starting_time : float,
-                  end_time: float,
-                  L: float,
-                  nx: int,
-                  nt: int,
-                  nt_effective: int,
-                  num_samples_train: int,
-                  num_samples_valid: int,
-                  num_samples_test: int,
-                  batch_size: int=1,
-                  device: torch.cuda.device="cpu") -> None:
+
+def generate_data(
+    args,
+    experiment: str,
+    starting_time: float,
+    end_time: float,
+    L: float,
+    nx: int,
+    nt: int,
+    nt_effective: int,
+    num_samples_train: int,
+    num_samples_valid: int,
+    num_samples_test: int,
+    batch_size: int = 1,
+    device: torch.cuda.device = "cpu",
+) -> None:
     """
     Generate data for KdV, KS equation on periodic spatial domains.
     Args:
@@ -248,57 +288,73 @@ def generate_data(experiment: str,
     Returns:
         None
     """
-    print(f'Generating data')
+    print("Generating data")
     dateTimeObj = datetime.now()
-    timestring = f'{dateTimeObj.date().month}{dateTimeObj.date().day}{dateTimeObj.time().hour}{dateTimeObj.time().minute}'
+    timestring = f"{dateTimeObj.date().month}{dateTimeObj.date().day}{dateTimeObj.time().hour}{dateTimeObj.time().minute}"
     if args.log:
-        logfile = f'data/log/{experiment}_time{timestring}.csv'
-        print(f'Writing to log file {logfile}')
-        sys.stdout = open(logfile, 'w')
+        logfile = f"data/log/{experiment}_time{timestring}.csv"
+        print(f"Writing to log file {logfile}")
+        sys.stdout = open(logfile, "w")
 
     # Create instances of PDE
-    if experiment == 'KdV':
-        pde = KdV(tmin=starting_time,
-                  tmax=end_time,
-                  grid_size=(nt, nx),
-                  nt_effective=nt_effective,
-                  L=L,
-                  device=device)
-    elif experiment == 'KS':
-        pde = KS(tmin=starting_time,
-                 tmax=end_time,
-                 grid_size=(nt, nx),
-                 nt_effective=nt_effective,
-                 L=L,
-                 device=device)
+    if experiment == "KdV":
+        pde = KdV(
+            delta=args.delta,
+            tmin=starting_time,
+            tmax=end_time,
+            grid_size=(nt, nx),
+            nt_effective=nt_effective,
+            L=L,
+            device=device,
+        )
+    elif experiment == "KS":
+        pde = KS(
+            tmin=starting_time,
+            tmax=end_time,
+            grid_size=(nt, nx),
+            nt_effective=nt_effective,
+            L=L,
+            device=device,
+        )
 
-    elif experiment == 'Burgers':
+    elif experiment == "Burgers":
         # Heat equation is generated; afterwards trajectories are transformed via Cole-Hopf transformation.
         # L is not set for Burgers equation, since it is very sensitive. Default value is 2*math.pi.
-        pde = Heat(tmin=starting_time,
-                 tmax=end_time,
-                 grid_size=(nt, nx),
-                 nt_effective=nt_effective,
-                 device=device)
+        pde = Heat(
+            tmin=starting_time,
+            tmax=end_time,
+            grid_size=(nt, nx),
+            nt_effective=nt_effective,
+            device=device,
+        )
 
     else:
         raise Exception("Wrong experiment")
 
     # Check if train, valid and test files already exist and replace if wanted
-    files = {("train", True, num_samples_train, args.suffix),
-             ("valid", num_samples_valid > 0, num_samples_valid, args.suffix),
-             ("test", num_samples_test > 0, num_samples_test, args.suffix)}
+    files = {
+        ("train", True, num_samples_train, args.suffix),
+        ("valid", num_samples_valid > 0, num_samples_valid, args.suffix),
+        ("test", num_samples_test > 0, num_samples_test, args.suffix),
+    }
     check_files(pde, files)
 
     # Obtain trajectories for different modes
     for mode, _, num_samples, suffix in files:
+        # if mode != "valid" and mode != "train":
+        #     continue
+        # Only generate "train" data so we can split the raw data
+        if mode != "train":
+            continue
         if num_samples > 0:
-            generate_trajectories(pde=pde,
-                                  mode=mode,
-                                  num_samples=num_samples,
-                                  suffix=suffix,
-                                  batch_size=batch_size,
-                                  device=device)
+            generate_trajectories(
+                pde=pde,
+                mode=mode,
+                num_samples=num_samples,
+                suffix=suffix,
+                batch_size=batch_size,
+                device=device,
+            )
 
 
 def main(args: argparse) -> None:
@@ -313,49 +369,85 @@ def main(args: argparse) -> None:
     if args.batch_size != 1:
         raise NotImplementedError
 
-    generate_data(experiment=args.experiment,
-                  starting_time=0.0,
-                  end_time=args.end_time,
-                  L=args.L,
-                  nt=args.nt,
-                  nt_effective=args.nt_effective,
-                  nx=args.nx,
-                  num_samples_train=args.train_samples,
-                  num_samples_valid=args.valid_samples,
-                  num_samples_test=args.test_samples,
-                  batch_size=args.batch_size,
-                  device=args.device)
+    generate_data(
+        args,
+        experiment=args.experiment,
+        starting_time=0.0,
+        end_time=args.end_time,
+        L=args.L,
+        nt=args.nt,
+        nt_effective=args.nt_effective,
+        nx=args.nx,
+        num_samples_train=args.train_samples,
+        num_samples_valid=args.valid_samples,
+        num_samples_test=args.test_samples,
+        batch_size=args.batch_size,
+        device=args.device,
+    )
 
 
 if __name__ == "__main__":
-
-    parser = argparse.ArgumentParser(description='Generating PDE data')
-    parser.add_argument('--experiment', type=str, default='KdV',
-                        help='Experiment for which data should create for: [KdV, KS, Burgers]')
-    parser.add_argument('--device', type=str, default='cpu',
-                        help='Used device')
-    parser.add_argument('--end_time', type=float, default=100.,
-                        help='How long do we want to simulate')
-    parser.add_argument('--nt', type=int, default=250,
-                        help='Time steps used for solving')
-    parser.add_argument('--nt_effective', type=int, default=140,
-                        help='Solved timesteps used for training')
-    parser.add_argument('--nx', type=int, default=256,
-                        help='Spatial resolution')
-    parser.add_argument('--L', type=float, default=128.,
-                        help='Length for which we want to solve the PDE')
-    parser.add_argument('--train_samples', type=int, default=2 ** 5,
-                        help='Samples in the training dataset')
-    parser.add_argument('--valid_samples', type=int, default=2 ** 5,
-                        help='Samples in the validation dataset')
-    parser.add_argument('--test_samples', type=int, default=2 ** 5,
-                        help='Samples in the test dataset')
-    parser.add_argument('--batch_size', type=int, default=1,
-                        help='Batch size used for creating training, val, and test dataset. So far the code only works for batch_size==1')
-    parser.add_argument('--suffix', type=str, default='',
-                        help='Suffix for additional datasets')
-    parser.add_argument('--log', type=eval, default=False,
-                        help='pip the output to log file')
+    parser = argparse.ArgumentParser(description="Generating PDE data")
+    parser.add_argument(
+        "--experiment",
+        type=str,
+        default="KdV",
+        help="Experiment for which data should create for: [KdV, KS, Burgers]",
+    )
+    parser.add_argument("--device", type=str, default="cpu", help="Used device")
+    parser.add_argument(
+        "--end_time", type=float, default=100.0, help="How long do we want to simulate"
+    )
+    parser.add_argument(
+        "--nt", type=int, default=250, help="Time steps used for solving"
+    )
+    parser.add_argument(
+        "--nt_effective",
+        type=int,
+        default=140,
+        help="Solved timesteps used for training",
+    )
+    parser.add_argument("--nx", type=int, default=256, help="Spatial resolution")
+    parser.add_argument(
+        "--L",
+        type=float,
+        default=128.0,
+        help="Length for which we want to solve the PDE",
+    )
+    parser.add_argument(
+        "--train_samples",
+        type=int,
+        default=2**5,
+        help="Samples in the training dataset",
+    )
+    parser.add_argument(
+        "--valid_samples",
+        type=int,
+        default=2**5,
+        help="Samples in the validation dataset",
+    )
+    parser.add_argument(
+        "--test_samples", type=int, default=2**5, help="Samples in the test dataset"
+    )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=1,
+        help="Batch size used for creating training, val, and test dataset. So far the code only works for batch_size==1",
+    )
+    parser.add_argument(
+        "--suffix", type=str, default="", help="Suffix for additional datasets"
+    )
+    parser.add_argument(
+        "--log", type=eval, default=False, help="pip the output to log file"
+    )
+    parser.add_argument("--delta", type=float, default=1.0, help="kdv delta")
+    parser.add_argument("--seed", type=int, default=42, help="seed")
 
     args = parser.parse_args()
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    import random
+
+    random.seed(args.seed)
     main(args)
